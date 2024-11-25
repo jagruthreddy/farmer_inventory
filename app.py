@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QMessageBox, QPushButton,
 
 from PyQt5.QtWidgets import QApplication
 
+from farmer import FarmerMainWindow
+
 class DatabaseConnection:
     def __init__(self):
         self.connection = None
@@ -113,7 +115,7 @@ class DatabaseConnection:
                 return False
         return False
 
-    def add_row(self, database, table, values):
+    def add_row(self, database, table, values, columns=None):
         if self.connection:
             try:
                 cursor = self.connection.cursor()
@@ -121,7 +123,22 @@ class DatabaseConnection:
                 
                 # Get column names
                 cursor.execute(f"SHOW COLUMNS FROM {table}")
-                columns = [column[0] for column in cursor.fetchall()]
+                table_columns = [column[0] for column in cursor.fetchall()]
+                
+                if columns is None:
+                    columns = table_columns
+                else:
+                    # Ensure the provided columns match the table columns
+                    if set(columns) != set(table_columns):
+                        raise ValueError("Provided columns do not match the table columns.")
+                
+                # Debug print to check columns and values
+                print(f"Columns: {columns}")
+                print(f"Values: {values}")
+                
+                # Ensure the number of columns matches the number of values
+                if len(columns) != len(values):
+                    raise ValueError("Column count doesn't match value count.")
                 
                 # Create the INSERT query
                 placeholders = ", ".join(["%s"] * len(values))
@@ -129,13 +146,13 @@ class DatabaseConnection:
                 query = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders})"
                 
                 cursor.execute(query, values)
-                self.connection.commit()
+                self.connection.commit()  # Corrected this line
                 return True
             except Error as e:
                 print(f"Error adding row: {e}")
                 return False
         return False
-
+        
     def delete_row(self, database, table, condition_column, condition_value):
         if self.connection:
             try:
@@ -148,6 +165,30 @@ class DatabaseConnection:
                 print(f"Error deleting row: {e}")
                 return False
         return False
+    
+    def get_product_by_id(self, product_id):
+        if self.connection:
+            try:
+                cursor = self.connection.cursor(dictionary=True)
+                cursor.execute("USE farmer_schema")
+                cursor.execute("SELECT * FROM Product WHERE ProductID = %s", (product_id,))
+                return cursor.fetchone()
+            except Error as e:
+                print(f"Error fetching product by ID: {e}")
+                return None
+        return None
+
+    def get_inventory_by_id(self, inventory_id):
+        if self.connection:
+            try:
+                cursor = self.connection.cursor(dictionary=True)
+                cursor.execute("USE farmer_schema")
+                cursor.execute("SELECT * FROM Inventory WHERE InventoryID = %s", (inventory_id,))
+                return cursor.fetchone()
+            except Error as e:
+                print(f"Error fetching inventory by ID: {e}")
+                return None
+        return None
 
 class CreateTableDialog(QDialog):
     def __init__(self, parent=None):
@@ -353,15 +394,63 @@ class MainWindow(QMainWindow):
         
         return table_name, columns
     
+    def get_product_by_id(self, product_id):
+        if self.connection:
+            try:
+                cursor = self.connection.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM Product WHERE ProductID = %s", (product_id,))
+                return cursor.fetchone()
+            except Error as e:
+                print(f"Error fetching product by ID: {e}")
+                return None
+        return None
+
+    def get_inventory_by_id(self, inventory_id):
+        if self.connection:
+            try:
+                cursor = self.connection.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM Inventory WHERE InventoryID = %s", (inventory_id,))
+                return cursor.fetchone()
+            except Error as e:
+                print(f"Error fetching inventory by ID: {e}")
+                return None
+        return None
+
+    def delete_product(self, product_id):
+        if self.connection:
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("DELETE FROM Inventory WHERE ProductID = %s", (product_id,))
+                cursor.execute("DELETE FROM Product WHERE ProductID = %s", (product_id,))
+                self.connection.commit()
+                return True
+            except Error as e:
+                print(f"Error deleting product: {e}")
+                return False
+        return False
+
+    def delete_inventory(self, inventory_id):
+        if self.connection:
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("DELETE FROM Inventory WHERE InventoryID = %s", (inventory_id,))
+                self.connection.commit()
+                return True
+            except Error as e:
+                print(f"Error deleting inventory: {e}")
+                return False
+        return False
+    
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.db_connection = None
+        self.user_type = None
         self.setup_ui()
 
     def setup_ui(self):
         self.setWindowTitle("Database Login")
-        self.setFixedSize(500, 500)
+        self.setFixedSize(500, 600)
         self.setStyleSheet("""
             QDialog {
                 background-color: #2b2b2b;
@@ -384,6 +473,40 @@ class LoginDialog(QDialog):
         title_label.setStyleSheet("font-size: 24px; color: #3EB489; margin-bottom: 20px;")
         title_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(title_label)
+
+        # User Type Selection
+        self.user_type_label = QLabel("Login as:", self)
+        self.user_type_combo = QComboBox(self)
+        self.user_type_combo.addItems(["Admin", "Farmer"])
+        self.user_type_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                background-color: #3d3d3d;
+                color: white;
+                border: 2px solid #3EB489;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QComboBox::drop-down {
+                background-color: #252525; 
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: url(down_arrow.png);
+                width: 12px;
+                height: 12px;
+            }
+            QComboBox:focus {
+                border: 2px solid #4ec49a;
+            }
+            QComboBox QAbstractItemView {  /* Style for dropdown menu */
+                background-color: black;  /* Background of dropdown items */
+                color: white;             /* Text color of dropdown items */
+                selection-background-color: #3EB489; /* Highlight color */
+                selection-color: #1e1e1e; /* Text color when highlighted */
+                border: 1px solid #3EB489; /* Border for dropdown list */
+            }
+        """)
         
         # Host input
         self.host_label = QLabel("Host:", self)
@@ -457,6 +580,8 @@ class LoginDialog(QDialog):
         """)
         
         # Add widgets to layout
+        layout.addWidget(self.user_type_label)
+        layout.addWidget(self.user_type_combo)
         layout.addWidget(self.host_label)
         layout.addWidget(self.host_input)
         layout.addWidget(self.username_label)
@@ -471,6 +596,7 @@ class LoginDialog(QDialog):
         host = self.host_input.text()
         username = self.username_input.text()
         password = self.password_input.text()
+        self.user_type = self.user_type_combo.currentText()
         
         self.db_connection = DatabaseConnection()
         if self.db_connection.connect(host, username, password):
@@ -1168,13 +1294,20 @@ if __name__ == "__main__":
         
         # Show login dialog
         login_dialog = LoginDialog()
-        result = login_dialog.exec_()
-        
-        if result == QDialog.Accepted and login_dialog.db_connection:
+
+        if login_dialog.exec_() == QDialog.Accepted:
             print("Login accepted, creating main window")
-            window = MainWindow(login_dialog.db_connection)
-            window.show()
+            db_connection = login_dialog.db_connection
+            user_type = login_dialog.user_type
+            
+            if user_type == "Admin":
+                main_window = MainWindow(db_connection)
+            elif user_type == "Farmer":
+                main_window = FarmerMainWindow(db_connection)
+            
+            main_window.show()
             sys.exit(app.exec_())
+
         else:
             print("Login cancelled or failed")
             sys.exit
